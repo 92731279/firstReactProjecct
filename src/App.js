@@ -1,16 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 import Sidebar from './components/Sidebar';
 import MainContent from './components/MainContent';
+import { db } from './firebase';
+import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot } from "firebase/firestore";
 
 function App() {
-  // États principaux
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState({ show: false, message: '' });
 
-  // Gestion des projets
   const validateProject = ({ title, description, dueDate }) => {
     if (!title.trim()) return 'Please enter a valid title';
     if (!description.trim()) return 'Please enter a valid description';
@@ -18,65 +18,62 @@ function App() {
     return null;
   };
 
-  const addProject = (project) => {
+  const addProject = async (project) => {
     const errorMessage = validateProject(project);
     if (errorMessage) return setError({ show: true, message: errorMessage });
-    
-    const newProject = {
-      ...project,
-      id: Date.now(),
-      tasks: []
-    };
-    
-    setProjects([...projects, newProject]);
-    setShowForm(false);
-  };
-
-  const deleteProject = (projectId) => {
-    setProjects(projects.filter(project => project.id !== projectId));
-    setSelectedProject(null);
-  };
-
-  const addTask = (projectId, taskContent) => {
-    const updatedProjects = projects.map(project => 
-      project.id === projectId
-        ? {
-            ...project,
-            tasks: [...(project.tasks || []), taskContent],
-            updatedAt: new Date().toISOString()
-          }
-        : project
-    );
   
-    setProjects(updatedProjects);
-  
-    // 🔁 Synchroniser selectedProject si c’est celui qu’on modifie
-    if (selectedProject?.id === projectId) {
-      const updatedProject = updatedProjects.find(p => p.id === projectId);
-      setSelectedProject(updatedProject);
+    try {
+      const docRef = await addDoc(collection(db, 'projects'), {
+        ...project,
+        tasks: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      
+      console.log("Project added with ID: ", docRef.id);
+      setShowForm(false);
+    } catch (err) {
+      console.error('Error adding project:', err);
+      setError({ show: true, message: 'Failed to add project' });
     }
   };
-  
-  const deleteTask = (projectId, taskIndex) => {
-    const updatedProjects = projects.map(project => 
-      project.id === projectId
-        ? {
-            ...project,
-            tasks: project.tasks.filter((_, index) => index !== taskIndex)
-          }
-        : project
-    );
-  
-    setProjects(updatedProjects);
-  
-    // 🔁 Synchroniser selectedProject si c’est celui qu’on modifie
-    if (selectedProject?.id === projectId) {
-      const updatedProject = updatedProjects.find(p => p.id === projectId);
-      setSelectedProject(updatedProject);
+
+  const deleteProject = async (projectId) => {
+    try {
+      await deleteDoc(doc(db, 'projects', projectId));
+      setSelectedProject(null);
+    } catch (err) {
+      console.error('Erreur suppression projet:', err);
     }
   };
-  
-  // Gestion des UI
+
+  const addTask = async (projectId, taskContent) => {
+    const project = projects.find(p => p.id === projectId);
+    const updatedTasks = [...(project.tasks || []), taskContent];
+
+    try {
+      await updateDoc(doc(db, 'projects', projectId), {
+        tasks: updatedTasks,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('Erreur ajout tâche:', err);
+    }
+  };
+
+  const deleteTask = async (projectId, taskIndex) => {
+    const project = projects.find(p => p.id === projectId);
+    const updatedTasks = project.tasks.filter((_, index) => index !== taskIndex);
+
+    try {
+      await updateDoc(doc(db, 'projects', projectId), {
+        tasks: updatedTasks
+      });
+    } catch (err) {
+      console.error('Erreur suppression tâche:', err);
+    }
+  };
+
   const openForm = () => {
     setSelectedProject(null);
     setShowForm(true);
@@ -88,6 +85,23 @@ function App() {
   };
 
   const closeError = () => setError({ ...error, show: false });
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'projects'), (snapshot) => {
+      const projectsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setProjects(projectsData);
+
+      if (selectedProject) {
+        const updatedProject = projectsData.find(p => p.id === selectedProject.id);
+        setSelectedProject(updatedProject);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [selectedProject]);
 
   return (
     <div className="app-container">
